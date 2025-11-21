@@ -8,7 +8,7 @@ import {
   calculateRange,
   getConsumptionLevel
 } from '../utils/calculator'
-import { showToast } from 'vant'
+import { showToast, showDialog } from 'vant'
 
 const router = useRouter()
 const route = useRoute()
@@ -194,12 +194,32 @@ function handleSave() {
   if (isEdit.value) {
     store.updateRecord(route.query.id, data)
     showToast('已更新')
+    router.push('/')
   } else {
-    store.addRecord(data)
+    const backupCheck = store.addRecord(data)
     showToast('已保存')
-  }
 
-  router.push('/')
+    // 检查是否需要提醒备份
+    if (backupCheck && backupCheck.shouldRemind) {
+      setTimeout(() => {
+        showDialog({
+          title: '💾 备份提醒',
+          message: `你已新增 ${backupCheck.newRecordsCount} 条记录，建议备份数据以防丢失。\n\n当前共有 ${backupCheck.totalRecords} 条记录。`,
+          confirmButtonText: '立即备份',
+          cancelButtonText: '稍后提醒',
+          showCancelButton: true,
+        }).then(() => {
+          // 用户选择立即备份
+          router.push('/settings?action=export')
+        }).catch(() => {
+          // 用户选择稍后提醒
+          showToast('下次新增20条记录时再次提醒')
+        })
+      }, 500) // 延迟500ms，让保存提示先显示
+    } else {
+      router.push('/')
+    }
+  }
 }
 
 // 返回

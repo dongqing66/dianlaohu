@@ -25,6 +25,9 @@ export const useAppStore = defineStore('app', () => {
   // 录入模板
   const templates = ref([])
 
+  // 备份提醒：记录上次备份时的记录数
+  const lastBackupCount = ref(0)
+
   // 计算电池总能量 (Wh)
   const totalEnergy = computed(() => {
     return settings.value.voltage * settings.value.capacity
@@ -50,6 +53,7 @@ export const useAppStore = defineStore('app', () => {
     const savedRecords = localStorage.getItem('ev-tuner-records')
     const savedLastInput = localStorage.getItem('ev-tuner-last-input')
     const savedTemplates = localStorage.getItem('ev-tuner-templates')
+    const savedBackupCount = localStorage.getItem('ev-tuner-last-backup-count')
 
     if (savedSettings) {
       settings.value = { ...settings.value, ...JSON.parse(savedSettings) }
@@ -62,6 +66,13 @@ export const useAppStore = defineStore('app', () => {
     }
     if (savedTemplates) {
       templates.value = JSON.parse(savedTemplates)
+    }
+    if (savedBackupCount) {
+      lastBackupCount.value = JSON.parse(savedBackupCount)
+    } else {
+      // 如果是第一次使用，将当前记录数作为基准
+      lastBackupCount.value = records.value.length
+      localStorage.setItem('ev-tuner-last-backup-count', JSON.stringify(lastBackupCount.value))
     }
   }
 
@@ -90,6 +101,9 @@ export const useAppStore = defineStore('app', () => {
     lastInput.value.busbarCurrent = record.busbarCurrent
     lastInput.value.phaseCurrent = record.phaseCurrent
     saveLastInput()
+
+    // 检查是否需要提醒备份
+    return checkBackupReminder()
   }
 
   // 更新记录
@@ -173,14 +187,48 @@ export const useAppStore = defineStore('app', () => {
     localStorage.setItem('ev-tuner-templates', JSON.stringify(templates.value))
   }
 
+  // 检查是否需要提醒备份
+  function checkBackupReminder() {
+    const currentCount = records.value.length
+    const diff = currentCount - lastBackupCount.value
+
+    // 每新增 20 条记录提醒一次
+    if (diff >= 20) {
+      return {
+        shouldRemind: true,
+        newRecordsCount: diff,
+        totalRecords: currentCount
+      }
+    }
+
+    return {
+      shouldRemind: false,
+      newRecordsCount: diff,
+      totalRecords: currentCount
+    }
+  }
+
+  // 重置备份计数器（用户备份后调用）
+  function resetBackupCounter() {
+    lastBackupCount.value = records.value.length
+    localStorage.setItem('ev-tuner-last-backup-count', JSON.stringify(lastBackupCount.value))
+  }
+
+  // 计算属性：需要备份的新记录数
+  const newRecordsCount = computed(() => {
+    return records.value.length - lastBackupCount.value
+  })
+
   return {
     settings,
     records,
     lastInput,
     templates,
+    lastBackupCount,
     totalEnergy,
     defaultTags,
     allTags,
+    newRecordsCount,
     loadData,
     saveSettings,
     saveRecords,
@@ -194,6 +242,8 @@ export const useAppStore = defineStore('app', () => {
     importJSON,
     clearRecords,
     saveTemplate,
-    deleteTemplate
+    deleteTemplate,
+    checkBackupReminder,
+    resetBackupCounter
   }
 })

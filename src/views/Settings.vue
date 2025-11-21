@@ -1,11 +1,13 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useAppStore } from '../stores'
+import { useRoute } from 'vue-router'
 import { showToast, showConfirmDialog, showDialog } from 'vant'
 import * as XLSX from 'xlsx'
 import { calculateRecordData } from '../utils/calculator'
 
 const store = useAppStore()
+const route = useRoute()
 
 // 电压预设值
 const voltagePresets = [48, 60, 64, 72]
@@ -126,6 +128,9 @@ function exportJSON() {
   a.download = `ev-tuner-backup_${new Date().toISOString().split('T')[0]}.json`
   a.click()
   URL.revokeObjectURL(url)
+
+  // 重置备份计数器
+  store.resetBackupCounter()
   showToast('已导出备份')
 }
 
@@ -174,10 +179,20 @@ async function clearAllData() {
 function showAbout() {
   showDialog({
     title: '电老虎测试',
-    message: '版本 1.0.0\n\n电动车性能调教助手\n记录骑行数据，分析能耗效率\n\n数据存储在本地浏览器中',
+    message: '版本 1.3.0\n\n电动车性能调教助手\n记录骑行数据，分析能耗效率\n\n数据存储在本地浏览器中',
     confirmButtonText: '知道了'
   })
 }
+
+// 处理路由参数
+onMounted(() => {
+  // 如果是从备份提醒跳转过来，自动触发导出
+  if (route.query.action === 'export') {
+    setTimeout(() => {
+      exportJSON()
+    }, 300)
+  }
+})
 </script>
 
 <template>
