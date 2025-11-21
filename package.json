@@ -19,7 +19,6 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@rollup/rollup-darwin-x64": "^4.53.3",
     "@vitejs/plugin-vue": "^6.0.1",
     "vite": "^7.2.2",
     "vite-plugin-pwa": "^1.1.0"
