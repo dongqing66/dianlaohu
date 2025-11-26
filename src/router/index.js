@@ -20,6 +20,18 @@ const routes = [
     meta: { title: '图表分析' }
   },
   {
+    path: '/charging',
+    name: 'Charging',
+    component: () => import('../views/Charging.vue'),
+    meta: { title: '充电管理' }
+  },
+  {
+    path: '/charging-entry',
+    name: 'ChargingEntry',
+    component: () => import('../views/ChargingEntry.vue'),
+    meta: { title: '记录充电' }
+  },
+  {
     path: '/settings',
     name: 'Settings',
     component: () => import('../views/Settings.vue'),

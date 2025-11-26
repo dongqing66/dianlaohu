@@ -14,7 +14,8 @@ const active = computed(() => {
   if (path === '/') return 0
   if (path === '/entry') return 1
   if (path === '/charts') return 2
-  if (path === '/settings') return 3
+  if (path === '/charging' || path === '/charging-entry') return 3
+  if (path === '/settings') return 4
   return 0
 })
 
@@ -47,7 +48,7 @@ onMounted(() => {
 })
 
 function onTabChange(index) {
-  const routes = ['/', '/entry', '/charts', '/settings']
+  const routes = ['/', '/entry', '/charts', '/charging', '/settings']
   router.push(routes[index])
 }
 
@@ -66,6 +67,11 @@ const tabs = [
     icon: 'chart',
     label: '图表',
     gradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)'
+  },
+  {
+    icon: 'flash',
+    label: '充电',
+    gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)'
   },
   {
     icon: 'settings',
@@ -120,6 +126,10 @@ const tabs = [
                 <template v-else-if="tab.icon === 'chart'">
                   <path d="M3 3v18h18" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                   <path d="M18 9l-5 5-4-4-4 4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </template>
+                <!-- 充电图标 -->
+                <template v-else-if="tab.icon === 'flash'">
+                  <path d="M13 2L3 14h8l-1 8 10-12h-8l1-8z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 </template>
                 <!-- 设置图标 -->
                 <template v-else-if="tab.icon === 'settings'">

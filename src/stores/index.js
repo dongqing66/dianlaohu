@@ -10,11 +10,15 @@ export const useAppStore = defineStore('app', () => {
     warningThreshold: 32,
     customTags: [],
     darkMode: false,
-    electricityPrice: 0.6 // 电价（元/kWh），默认 0.6 元
+    electricityPrice: 0.6, // 电价（元/kWh），默认 0.6 元
+    chargingEfficiency: 0.88 // 充电效率（默认 88%，即有 12% 损耗）
   })
 
   // 骑行记录
   const records = ref([])
+
+  // 充电记录
+  const chargingRecords = ref([])
 
   // 上次录入的母线/相线值（用于自动填充）
   const lastInput = ref({
@@ -51,6 +55,7 @@ export const useAppStore = defineStore('app', () => {
   function loadData() {
     const savedSettings = localStorage.getItem('ev-tuner-settings')
     const savedRecords = localStorage.getItem('ev-tuner-records')
+    const savedChargingRecords = localStorage.getItem('ev-tuner-charging-records')
     const savedLastInput = localStorage.getItem('ev-tuner-last-input')
     const savedTemplates = localStorage.getItem('ev-tuner-templates')
     const savedBackupCount = localStorage.getItem('ev-tuner-last-backup-count')
@@ -60,6 +65,9 @@ export const useAppStore = defineStore('app', () => {
     }
     if (savedRecords) {
       records.value = JSON.parse(savedRecords)
+    }
+    if (savedChargingRecords) {
+      chargingRecords.value = JSON.parse(savedChargingRecords)
     }
     if (savedLastInput) {
       lastInput.value = JSON.parse(savedLastInput)
@@ -219,9 +227,45 @@ export const useAppStore = defineStore('app', () => {
     return records.value.length - lastBackupCount.value
   })
 
+  // ========== 充电记录管理 ==========
+
+  // 保存充电记录到 localStorage
+  function saveChargingRecords() {
+    localStorage.setItem('ev-tuner-charging-records', JSON.stringify(chargingRecords.value))
+  }
+
+  // 添加充电记录
+  function addChargingRecord(record) {
+    const id = Date.now().toString()
+    chargingRecords.value.unshift({ ...record, id })
+    saveChargingRecords()
+  }
+
+  // 更新充电记录
+  function updateChargingRecord(id, record) {
+    const index = chargingRecords.value.findIndex(r => r.id === id)
+    if (index !== -1) {
+      chargingRecords.value[index] = { ...record, id }
+      saveChargingRecords()
+    }
+  }
+
+  // 删除充电记录
+  function deleteChargingRecord(id) {
+    chargingRecords.value = chargingRecords.value.filter(r => r.id !== id)
+    saveChargingRecords()
+  }
+
+  // 清空充电记录
+  function clearChargingRecords() {
+    chargingRecords.value = []
+    saveChargingRecords()
+  }
+
   return {
     settings,
     records,
+    chargingRecords,
     lastInput,
     templates,
     lastBackupCount,
@@ -244,6 +288,11 @@ export const useAppStore = defineStore('app', () => {
     saveTemplate,
     deleteTemplate,
     checkBackupReminder,
-    resetBackupCounter
+    resetBackupCounter,
+    addChargingRecord,
+    updateChargingRecord,
+    deleteChargingRecord,
+    clearChargingRecords,
+    saveChargingRecords
   }
 })

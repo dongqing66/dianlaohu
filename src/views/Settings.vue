@@ -19,6 +19,7 @@ const excellentThreshold = ref(store.settings.excellentThreshold)
 const warningThreshold = ref(store.settings.warningThreshold)
 const darkMode = ref(store.settings.darkMode)
 const electricityPrice = ref(store.settings.electricityPrice)
+const chargingEfficiency = ref(store.settings.chargingEfficiency * 100) // 转换为百分比显示
 
 // 新标签输入
 const newTag = ref('')
@@ -41,7 +42,8 @@ function saveSettings() {
     excellentThreshold: excellentThreshold.value,
     warningThreshold: warningThreshold.value,
     darkMode: darkMode.value,
-    electricityPrice: electricityPrice.value
+    electricityPrice: electricityPrice.value,
+    chargingEfficiency: chargingEfficiency.value / 100 // 转换为小数保存
   })
   showToast('设置已保存')
 }
@@ -150,6 +152,7 @@ function importJSON(event) {
       warningThreshold.value = store.settings.warningThreshold
       darkMode.value = store.settings.darkMode
       electricityPrice.value = store.settings.electricityPrice
+      chargingEfficiency.value = (store.settings.chargingEfficiency || 0.88) * 100 // 转换为百分比
       showToast('导入成功')
     } else {
       showToast('导入失败，文件格式错误')
@@ -250,6 +253,25 @@ onMounted(() => {
       </van-field>
       <van-cell title-class="hint-text">
         用于计算每次骑行的电费成本
+      </van-cell>
+    </van-cell-group>
+
+    <!-- 充电效率设置 -->
+    <van-cell-group inset title="充电效率设置">
+      <van-field
+        v-model="chargingEfficiency"
+        type="number"
+        label="充电效率"
+        placeholder="输入充电效率"
+        @blur="saveSettings"
+      >
+        <template #button>%</template>
+      </van-field>
+      <van-cell title-class="hint-text">
+        充电时的能量转换效率，默认88%（12%损耗）
+      </van-cell>
+      <van-cell title-class="hint-text">
+        💡 充电时约有12%能量损耗，实际入电量 = 充电量 × 效率
       </van-cell>
     </van-cell-group>
 

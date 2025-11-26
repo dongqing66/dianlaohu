@@ -16,6 +16,9 @@ const customDateRange = ref([new Date(), new Date()])
 const compareMode = ref(false)
 const selectedRecords = ref([])
 const showCompareDialog = ref(false)
+const selectedYear = ref(new Date().getFullYear()) // 选中的年份
+const selectedMonth = ref(new Date().getMonth() + 1) // 选中的月份 (1-12)
+const statsViewMode = ref('year') // 'year' 或 'month'
 
 // 计算后的记录列表
 const computedRecords = computed(() => {
@@ -164,6 +167,150 @@ const monthStats = computed(() => {
   }
 })
 
+// 获取所有记录的年份范围
+const availableYears = computed(() => {
+  const years = new Set()
+
+  store.records.forEach(record => {
+    const year = new Date(record.datetime).getFullYear()
+    years.add(year)
+  })
+
+  store.chargingRecords.forEach(record => {
+    const year = new Date(record.datetime).getFullYear()
+    years.add(year)
+  })
+
+  return Array.from(years).sort((a, b) => b - a) // 降序排列
+})
+
+// 年度/月度综合统计（骑行 + 充电）
+const yearStats = computed(() => {
+  let yearRideRecords, yearChargingRecords
+
+  if (statsViewMode.value === 'year') {
+    // 年度统计
+    yearRideRecords = store.records.map(record =>
+      calculateRecordData(record, store.totalEnergy, store.settings.electricityPrice)
+    ).filter(record => {
+      const date = new Date(record.datetime)
+      return date.getFullYear() === selectedYear.value
+    })
+
+    yearChargingRecords = store.chargingRecords.filter(r => {
+      const date = new Date(r.datetime)
+      return date.getFullYear() === selectedYear.value
+    })
+  } else {
+    // 月度统计
+    yearRideRecords = store.records.map(record =>
+      calculateRecordData(record, store.totalEnergy, store.settings.electricityPrice)
+    ).filter(record => {
+      const date = new Date(record.datetime)
+      return date.getFullYear() === selectedYear.value &&
+             date.getMonth() + 1 === selectedMonth.value
+    })
+
+    yearChargingRecords = store.chargingRecords.filter(r => {
+      const date = new Date(r.datetime)
+      return date.getFullYear() === selectedYear.value &&
+             date.getMonth() + 1 === selectedMonth.value
+    })
+  }
+
+  const hasData = yearRideRecords.length > 0 || yearChargingRecords.length > 0
+
+  // 骑行统计
+  const rideTotalDistance = yearRideRecords.reduce((sum, r) => sum + r.distance, 0)
+  const rideAvgConsumption = yearRideRecords.length > 0
+    ? yearRideRecords.reduce((sum, r) => sum + r.energyConsumption, 0) / yearRideRecords.length
+    : 0
+  const rideTotalCost = yearRideRecords.reduce((sum, r) => sum + r.electricityCost, 0)
+
+  // 充电统计
+  let chargingTotalEnergy = 0
+  let chargingTotalCost = 0
+  yearChargingRecords.forEach(r => {
+    const socCharged = r.socAfter - r.socBefore
+    const batteryEnergy = (socCharged / 100) * (store.totalEnergy / 1000)
+    const gridEnergy = batteryEnergy / (store.settings.chargingEfficiency || 0.88)
+    chargingTotalEnergy += gridEnergy
+    chargingTotalCost += gridEnergy * store.settings.electricityPrice
+  })
+
+  return {
+    year: selectedYear.value,
+    month: selectedMonth.value,
+    viewMode: statsViewMode.value,
+    hasData,
+    ride: {
+      count: yearRideRecords.length,
+      totalDistance: Math.round(rideTotalDistance * 10) / 10,
+      avgConsumption: Math.round(rideAvgConsumption * 10) / 10,
+      totalCost: Math.round(rideTotalCost * 100) / 100
+    },
+    charging: {
+      count: yearChargingRecords.length,
+      totalEnergy: Math.round(chargingTotalEnergy * 100) / 100,
+      totalCost: Math.round(chargingTotalCost * 100) / 100
+    }
+  }
+})
+
+// 切换视图模式
+function toggleViewMode() {
+  statsViewMode.value = statsViewMode.value === 'year' ? 'month' : 'year'
+}
+
+// 切换到上一年
+function prevYear() {
+  selectedYear.value--
+}
+
+// 切换到下一年
+function nextYear() {
+  const currentYear = new Date().getFullYear()
+  if (selectedYear.value < currentYear) {
+    selectedYear.value++
+  }
+}
+
+// 切换到上一月
+function prevMonth() {
+  if (selectedMonth.value === 1) {
+    selectedMonth.value = 12
+    selectedYear.value--
+  } else {
+    selectedMonth.value--
+  }
+}
+
+// 切换到下一月
+function nextMonth() {
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const currentMonth = now.getMonth() + 1
+
+  if (selectedYear.value === currentYear && selectedMonth.value >= currentMonth) {
+    return // 不能超过当前月份
+  }
+
+  if (selectedMonth.value === 12) {
+    selectedMonth.value = 1
+    selectedYear.value++
+  } else {
+    selectedMonth.value++
+  }
+}
+
+// 判断是否能继续下一月
+const canNextMonth = computed(() => {
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const currentMonth = now.getMonth() + 1
+  return !(selectedYear.value === currentYear && selectedMonth.value >= currentMonth)
+})
+
 // 下拉刷新
 function onRefresh() {
   setTimeout(() => {
@@ -273,6 +420,90 @@ const comparisonData = computed(() => {
         <van-icon name="plus" size="20" @click="handleAdd" />
       </template>
     </van-nav-bar>
+
+    <!-- 年度统计卡片 -->
+    <div v-if="yearStats && (yearStats.hasData || availableYears.length > 0)" class="year-stats-section">
+      <div class="year-stats-card">
+        <div class="year-header">
+          <!-- 视图切换按钮 -->
+          <div class="view-mode-toggle" @click="toggleViewMode">
+            <van-icon :name="statsViewMode === 'year' ? 'calendar-o' : 'orders-o'" size="16" />
+          </div>
+
+          <!-- 年度视图 -->
+          <template v-if="statsViewMode === 'year'">
+            <van-icon name="arrow-left" size="20" @click="prevYear" class="year-arrow" />
+            <span>{{ yearStats.year }} 年度统计</span>
+            <van-icon
+              name="arrow"
+              size="20"
+              @click="nextYear"
+              class="year-arrow"
+              :class="{ disabled: selectedYear >= new Date().getFullYear() }"
+            />
+          </template>
+          <!-- 月度视图 -->
+          <template v-else>
+            <van-icon name="arrow-left" size="20" @click="prevMonth" class="year-arrow" />
+            <span>{{ yearStats.year }}年{{ yearStats.month }}月统计</span>
+            <van-icon
+              name="arrow"
+              size="20"
+              @click="nextMonth"
+              class="year-arrow"
+              :class="{ disabled: !canNextMonth }"
+            />
+          </template>
+        </div>
+        <!-- 有数据时显示统计 -->
+        <div v-if="yearStats.hasData" class="year-content">
+          <!-- 骑行统计 -->
+          <div class="stat-section ride-section">
+            <div class="section-title">🚲 骑行</div>
+            <div class="stat-grid">
+              <div class="stat-item">
+                <span class="label">次数</span>
+                <span class="value">{{ yearStats.ride.count }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="label">总里程</span>
+                <span class="value">{{ yearStats.ride.totalDistance }} km</span>
+              </div>
+              <div class="stat-item">
+                <span class="label">平均能耗</span>
+                <span class="value">{{ yearStats.ride.avgConsumption }} Wh/km</span>
+              </div>
+              <div class="stat-item">
+                <span class="label">总电费</span>
+                <span class="value cost">¥{{ yearStats.ride.totalCost }}</span>
+              </div>
+            </div>
+          </div>
+          <!-- 充电统计 -->
+          <div class="stat-section charging-section">
+            <div class="section-title">⚡ 充电</div>
+            <div class="stat-grid">
+              <div class="stat-item">
+                <span class="label">次数</span>
+                <span class="value">{{ yearStats.charging.count }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="label">总度数</span>
+                <span class="value">{{ yearStats.charging.totalEnergy }} kWh</span>
+              </div>
+              <div class="stat-item">
+                <span class="label">总费用</span>
+                <span class="value cost">¥{{ yearStats.charging.totalCost }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- 无数据时显示提示 -->
+        <div v-else class="year-no-data">
+          <van-empty description="该年度暂无记录" image="search" />
+        </div>
+      </div>
+    </div>
 
     <!-- 日期范围筛选 -->
     <div class="filter-section">
@@ -679,6 +910,179 @@ const comparisonData = computed(() => {
 <style scoped>
 .home-page {
   padding-bottom: 20px;
+}
+
+/* 年度统计卡片 */
+.year-stats-section {
+  padding: 16px;
+  padding-top: 10px;
+}
+
+.year-stats-card {
+  background: #fff;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  animation: slideInDown 0.5s ease-out;
+}
+
+@keyframes slideInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dark-mode .year-stats-card {
+  background: #2a2a2a;
+}
+
+.year-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  background: linear-gradient(135deg, #fee140 0%, #fa709a 100%);
+  color: white;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.year-header span {
+  flex: 1;
+  text-align: center;
+}
+
+.year-arrow {
+  cursor: pointer;
+  transition: all 0.3s ease;
+  padding: 4px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.year-arrow:hover {
+  background: rgba(255, 255, 255, 0.2);
+  transform: scale(1.1);
+}
+
+.year-arrow:active {
+  transform: scale(0.95);
+}
+
+.year-arrow.disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.year-arrow.disabled:hover {
+  background: transparent;
+  transform: none;
+}
+
+.view-mode-toggle {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+
+.view-mode-toggle:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(1.1);
+}
+
+.view-mode-toggle:active {
+  transform: scale(0.95);
+}
+
+.year-content {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.year-no-data {
+  padding: 40px 16px;
+}
+
+.stat-section {
+  border-radius: 12px;
+  padding: 14px;
+  background: #f7f8fa;
+}
+
+.dark-mode .stat-section {
+  background: #1e1e1e;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #323233;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e0e0e0;
+}
+
+.dark-mode .section-title {
+  color: #fff;
+  border-bottom-color: #3a3a3a;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 8px;
+  background: white;
+  transition: all 0.3s ease;
+}
+
+.dark-mode .stat-item {
+  background: #2a2a2a;
+}
+
+.stat-item:active {
+  transform: scale(0.98);
+}
+
+.stat-item .label {
+  font-size: 12px;
+  color: #969799;
+  font-weight: 500;
+}
+
+.stat-item .value {
+  font-size: 20px;
+  font-weight: bold;
+  color: #323233;
+}
+
+.dark-mode .stat-item .value {
+  color: #fff;
+}
+
+.stat-item .value.cost {
+  color: #ff976a;
 }
 
 /* 毛玻璃导航栏 */

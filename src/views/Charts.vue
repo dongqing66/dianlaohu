@@ -11,12 +11,18 @@ const busbarChartRef = ref(null)
 const tempChartRef = ref(null)
 const trendChartRef = ref(null)
 const consumptionTrendChartRef = ref(null)
+const monthlyChargingChartRef = ref(null)
+const weeklyChargingChartRef = ref(null)
+const yearlyChargingChartRef = ref(null)
 
 // 图表实例
 let busbarChart = null
 let tempChart = null
 let trendChart = null
 let consumptionTrendChart = null
+let monthlyChargingChart = null
+let weeklyChargingChart = null
+let yearlyChargingChart = null
 
 // 当前选中的图表 Tab
 const activeTab = ref(0)
@@ -98,24 +104,110 @@ function calculateMovingAverage(data, window = 7) {
   // 自适应窗口大小：数据少于7个时使用较小窗口
   const actualWindow = Math.min(window, Math.max(3, Math.floor(data.length / 2)))
 
-  if (data.length < 3) return data.map(d => d.consumption)
-
   const result = []
   for (let i = 0; i < data.length; i++) {
     if (i < actualWindow - 1) {
-      // 前面的数据点，使用可用的数据计算平均
-      const slice = data.slice(0, i + 1)
-      const avg = slice.reduce((sum, item) => sum + item.consumption, 0) / slice.length
-      result.push(avg)
+      result.push(null)
     } else {
-      // 使用完整的窗口计算
-      const slice = data.slice(i - actualWindow + 1, i + 1)
-      const avg = slice.reduce((sum, item) => sum + item.consumption, 0) / slice.length
-      result.push(avg)
+      const sum = data.slice(i - actualWindow + 1, i + 1).reduce((a, b) => a + b, 0)
+      result.push(Math.round((sum / actualWindow) * 10) / 10)
     }
   }
   return result
 }
+
+// ========== 充电数据统计 ==========
+
+// 按月充电统计数据
+const monthlyChargingData = computed(() => {
+  const stats = {}
+
+  store.chargingRecords.forEach(r => {
+    const date = new Date(r.datetime)
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+
+    if (!stats[key]) {
+      stats[key] = { count: 0, totalCost: 0 }
+    }
+
+    stats[key].count++
+    const socCharged = r.socAfter - r.socBefore
+    const batteryEnergy = (socCharged / 100) * (store.totalEnergy / 1000)
+    const gridEnergy = batteryEnergy / (store.settings.chargingEfficiency || 0.88)
+    stats[key].totalCost += gridEnergy * store.settings.electricityPrice
+  })
+
+  const sortedKeys = Object.keys(stats).sort().slice(-6)
+
+  return {
+    labels: sortedKeys,
+    counts: sortedKeys.map(k => stats[k].count),
+    costs: sortedKeys.map(k => Math.round(stats[k].totalCost * 100) / 100)
+  }
+})
+
+// 按周充电统计数据
+const weeklyChargingData = computed(() => {
+  const stats = {}
+
+  store.chargingRecords.forEach(r => {
+    const date = new Date(r.datetime)
+    const weekStart = new Date(date)
+    weekStart.setDate(date.getDate() - date.getDay())
+    const key = weekStart.toISOString().split('T')[0]
+
+    if (!stats[key]) {
+      stats[key] = { count: 0, totalCost: 0 }
+    }
+
+    stats[key].count++
+    const socCharged = r.socAfter - r.socBefore
+    const batteryEnergy = (socCharged / 100) * (store.totalEnergy / 1000)
+    const gridEnergy = batteryEnergy / (store.settings.chargingEfficiency || 0.88)
+    stats[key].totalCost += gridEnergy * store.settings.electricityPrice
+  })
+
+  const sortedKeys = Object.keys(stats).sort().slice(-8)
+
+  return {
+    labels: sortedKeys.map(k => {
+      const d = new Date(k)
+      return `${d.getMonth() + 1}/${d.getDate()}`
+    }),
+    counts: sortedKeys.map(k => stats[k].count),
+    costs: sortedKeys.map(k => Math.round(stats[k].totalCost * 100) / 100)
+  }
+})
+
+// 按年充电统计数据
+const yearlyChargingData = computed(() => {
+  const stats = {}
+
+  store.chargingRecords.forEach(r => {
+    const date = new Date(r.datetime)
+    const key = String(date.getFullYear())
+
+    if (!stats[key]) {
+      stats[key] = { count: 0, totalEnergy: 0, totalCost: 0 }
+    }
+
+    stats[key].count++
+    const socCharged = r.socAfter - r.socBefore
+    const batteryEnergy = (socCharged / 100) * (store.totalEnergy / 1000)
+    const gridEnergy = batteryEnergy / (store.settings.chargingEfficiency || 0.88)
+    stats[key].totalEnergy += gridEnergy
+    stats[key].totalCost += gridEnergy * store.settings.electricityPrice
+  })
+
+  const sortedKeys = Object.keys(stats).sort()
+
+  return {
+    labels: sortedKeys,
+    counts: sortedKeys.map(k => stats[k].count),
+    energies: sortedKeys.map(k => Math.round(stats[k].totalEnergy * 100) / 100),
+    costs: sortedKeys.map(k => Math.round(stats[k].totalCost * 100) / 100)
+  }
+})
 
 // 能耗趋势数据（含移动平均线）
 const consumptionTrendData = computed(() => {
@@ -721,6 +813,306 @@ function initConsumptionTrendChart() {
   }, 500)
 }
 
+// 初始化月度充电图表
+function initMonthlyChargingChart() {
+  if (!monthlyChargingChartRef.value) return
+
+  loading.value = true
+
+  if (monthlyChargingChart) {
+    monthlyChargingChart.dispose()
+  }
+
+  monthlyChargingChart = echarts.init(monthlyChargingChartRef.value)
+
+  const hasData = monthlyChargingData.value.labels.length > 0
+
+  const option = {
+    title: {
+      text: hasData ? '月度充电次数' : '暂无充电数据',
+      left: 'center',
+      textStyle: {
+        fontSize: 16,
+        color: store.settings.darkMode ? '#fff' : '#323233'
+      }
+    },
+    grid: { left: '15%', right: '10%', top: '20%', bottom: '15%' },
+    xAxis: {
+      type: 'category',
+      data: hasData ? monthlyChargingData.value.labels : ['暂无'],
+      axisLabel: {
+        rotate: 45,
+        fontSize: 11,
+        color: store.settings.darkMode ? '#999' : '#666'
+      },
+      axisLine: {
+        lineStyle: {
+          color: store.settings.darkMode ? '#666' : '#e0e0e0'
+        }
+      }
+    },
+    yAxis: {
+      type: 'value',
+      name: '次数',
+      axisLabel: {
+        color: store.settings.darkMode ? '#999' : '#666'
+      },
+      axisLine: {
+        lineStyle: {
+          color: store.settings.darkMode ? '#666' : '#e0e0e0'
+        }
+      },
+      splitLine: {
+        lineStyle: {
+          color: store.settings.darkMode ? '#333' : '#f0f0f0'
+        }
+      }
+    },
+    series: [{
+      type: 'bar',
+      data: hasData ? monthlyChargingData.value.counts : [0],
+      itemStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: '#fa709a' },
+          { offset: 1, color: '#fee140' }
+        ])
+      },
+      label: { show: hasData, position: 'top' }
+    }]
+  }
+
+  monthlyChargingChart.setOption(option)
+
+  setTimeout(() => {
+    loading.value = false
+  }, 500)
+}
+
+// 初始化周度充电图表
+function initWeeklyChargingChart() {
+  if (!weeklyChargingChartRef.value) return
+
+  loading.value = true
+
+  if (weeklyChargingChart) {
+    weeklyChargingChart.dispose()
+  }
+
+  weeklyChargingChart = echarts.init(weeklyChargingChartRef.value)
+
+  const hasData = weeklyChargingData.value.labels.length > 0
+
+  const option = {
+    title: {
+      text: hasData ? '周度充电费用' : '暂无充电数据',
+      left: 'center',
+      textStyle: {
+        fontSize: 16,
+        color: store.settings.darkMode ? '#fff' : '#323233'
+      }
+    },
+    grid: { left: '15%', right: '10%', top: '20%', bottom: '15%' },
+    xAxis: {
+      type: 'category',
+      data: hasData ? weeklyChargingData.value.labels : ['暂无'],
+      axisLabel: {
+        rotate: 45,
+        fontSize: 11,
+        color: store.settings.darkMode ? '#999' : '#666'
+      },
+      axisLine: {
+        lineStyle: {
+          color: store.settings.darkMode ? '#666' : '#e0e0e0'
+        }
+      }
+    },
+    yAxis: {
+      type: 'value',
+      name: '元',
+      axisLabel: {
+        color: store.settings.darkMode ? '#999' : '#666'
+      },
+      axisLine: {
+        lineStyle: {
+          color: store.settings.darkMode ? '#666' : '#e0e0e0'
+        }
+      },
+      splitLine: {
+        lineStyle: {
+          color: store.settings.darkMode ? '#333' : '#f0f0f0'
+        }
+      }
+    },
+    series: [{
+      type: 'bar',
+      data: hasData ? weeklyChargingData.value.costs : [0],
+      itemStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: '#667eea' },
+          { offset: 1, color: '#764ba2' }
+        ])
+      },
+      label: { show: hasData, position: 'top', formatter: '¥{c}' }
+    }]
+  }
+
+  weeklyChargingChart.setOption(option)
+
+  setTimeout(() => {
+    loading.value = false
+  }, 500)
+}
+
+// 初始化年度充电图表
+function initYearlyChargingChart() {
+  if (!yearlyChargingChartRef.value) return
+
+  loading.value = true
+
+  if (yearlyChargingChart) {
+    yearlyChargingChart.dispose()
+  }
+
+  yearlyChargingChart = echarts.init(yearlyChargingChartRef.value)
+
+  const hasData = yearlyChargingData.value.labels.length > 0
+
+  const option = {
+    title: {
+      text: hasData ? '年度充电统计' : '暂无充电数据',
+      left: 'center',
+      textStyle: {
+        fontSize: 16,
+        color: store.settings.darkMode ? '#fff' : '#323233'
+      }
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: {
+        type: 'shadow'
+      },
+      backgroundColor: 'rgba(0, 0, 0, 0.8)',
+      borderWidth: 0,
+      textStyle: {
+        color: '#fff'
+      },
+      formatter: params => {
+        let result = `<div style="font-size: 12px;">${params[0].axisValue}年</div>`
+        params.forEach(item => {
+          result += `<div style="margin-top: 4px;">${item.marker} ${item.seriesName}: <strong>${item.value}</strong>${item.seriesName.includes('费用') ? '元' : item.seriesName.includes('度数') ? 'kWh' : '次'}</div>`
+        })
+        return result
+      }
+    },
+    legend: {
+      data: ['充电次数', '充电度数', '充电费用'],
+      top: '12%',
+      textStyle: {
+        color: store.settings.darkMode ? '#999' : '#666'
+      }
+    },
+    grid: { left: '15%', right: '10%', top: '28%', bottom: '15%' },
+    xAxis: {
+      type: 'category',
+      data: hasData ? yearlyChargingData.value.labels : ['暂无'],
+      axisLabel: {
+        fontSize: 12,
+        color: store.settings.darkMode ? '#999' : '#666'
+      },
+      axisLine: {
+        lineStyle: {
+          color: store.settings.darkMode ? '#666' : '#e0e0e0'
+        }
+      }
+    },
+    yAxis: [
+      {
+        type: 'value',
+        name: '次数/度数',
+        axisLabel: {
+          color: store.settings.darkMode ? '#999' : '#666'
+        },
+        axisLine: {
+          lineStyle: {
+            color: store.settings.darkMode ? '#666' : '#e0e0e0'
+          }
+        },
+        splitLine: {
+          lineStyle: {
+            color: store.settings.darkMode ? '#333' : '#f0f0f0'
+          }
+        }
+      },
+      {
+        type: 'value',
+        name: '费用(元)',
+        axisLabel: {
+          color: store.settings.darkMode ? '#999' : '#666',
+          formatter: '¥{value}'
+        },
+        axisLine: {
+          lineStyle: {
+            color: store.settings.darkMode ? '#666' : '#e0e0e0'
+          }
+        },
+        splitLine: {
+          show: false
+        }
+      }
+    ],
+    series: [
+      {
+        name: '充电次数',
+        type: 'bar',
+        data: hasData ? yearlyChargingData.value.counts : [0],
+        itemStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: '#4facfe' },
+            { offset: 1, color: '#00f2fe' }
+          ])
+        },
+        label: { show: hasData, position: 'top' }
+      },
+      {
+        name: '充电度数',
+        type: 'bar',
+        data: hasData ? yearlyChargingData.value.energies : [0],
+        itemStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: '#43e97b' },
+            { offset: 1, color: '#38f9d7' }
+          ])
+        },
+        label: { show: hasData, position: 'top', formatter: '{c}kWh' }
+      },
+      {
+        name: '充电费用',
+        type: 'line',
+        yAxisIndex: 1,
+        data: hasData ? yearlyChargingData.value.costs : [0],
+        smooth: true,
+        lineStyle: {
+          width: 3,
+          color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+            { offset: 0, color: '#fee140' },
+            { offset: 1, color: '#fa709a' }
+          ])
+        },
+        itemStyle: {
+          color: '#fa709a'
+        },
+        label: { show: hasData, position: 'top', formatter: '¥{c}' }
+      }
+    ]
+  }
+
+  yearlyChargingChart.setOption(option)
+
+  setTimeout(() => {
+    loading.value = false
+  }, 500)
+}
+
 // 监听 Tab 切换
 watch(activeTab, async () => {
   await nextTick()
@@ -728,6 +1120,9 @@ watch(activeTab, async () => {
   else if (activeTab.value === 1) initTempChart()
   else if (activeTab.value === 2) initTrendChart()
   else if (activeTab.value === 3) initConsumptionTrendChart()
+  else if (activeTab.value === 4) initWeeklyChargingChart()
+  else if (activeTab.value === 5) initMonthlyChargingChart()
+  else if (activeTab.value === 6) initYearlyChargingChart()
 })
 
 // 监听深色模式
@@ -736,6 +1131,9 @@ watch(() => store.settings.darkMode, () => {
   else if (activeTab.value === 1) initTempChart()
   else if (activeTab.value === 2) initTrendChart()
   else if (activeTab.value === 3) initConsumptionTrendChart()
+  else if (activeTab.value === 4) initWeeklyChargingChart()
+  else if (activeTab.value === 5) initMonthlyChargingChart()
+  else if (activeTab.value === 6) initYearlyChargingChart()
 })
 
 onMounted(() => {
@@ -750,6 +1148,9 @@ window.addEventListener('resize', () => {
   tempChart?.resize()
   trendChart?.resize()
   consumptionTrendChart?.resize()
+  monthlyChargingChart?.resize()
+  weeklyChargingChart?.resize()
+  yearlyChargingChart?.resize()
 })
 </script>
 
@@ -868,7 +1269,7 @@ window.addEventListener('resize', () => {
         </div>
       </div>
 
-      <!-- Tab 切换 -->
+      <!--Tab 切换 -->
       <div class="tab-bar">
         <van-button
           :type="activeTab === 0 ? 'primary' : 'default'"
@@ -898,6 +1299,27 @@ window.addEventListener('resize', () => {
         >
           能耗趋势
         </van-button>
+        <van-button
+          :type="activeTab === 4 ? 'primary' : 'default'"
+          size="small"
+          @click="activeTab = 4"
+        >
+          周度充电
+        </van-button>
+        <van-button
+          :type="activeTab === 5 ? 'primary' : 'default'"
+          size="small"
+          @click="activeTab = 5"
+        >
+          月度充电
+        </van-button>
+        <van-button
+          :type="activeTab === 6 ? 'primary' : 'default'"
+          size="small"
+          @click="activeTab = 6"
+        >
+          年度充电
+        </van-button>
       </div>
 
       <!-- 图表容器 + 骨架屏 -->
@@ -911,6 +1333,21 @@ window.addEventListener('resize', () => {
           </div>
           <div v-show="activeTab === 2" ref="trendChartRef" class="chart-box"></div>
           <div v-show="activeTab === 3" ref="consumptionTrendChartRef" class="chart-box"></div>
+          <div v-show="activeTab === 4" ref="weeklyChargingChartRef" class="chart-box">
+            <div v-if="store.chargingRecords.length === 0" class="no-data">
+              暂无充电数据，请先添加充电记录
+            </div>
+          </div>
+          <div v-show="activeTab === 5" ref="monthlyChargingChartRef" class="chart-box">
+            <div v-if="store.chargingRecords.length === 0" class="no-data">
+              暂无充电数据，请先添加充电记录
+            </div>
+          </div>
+          <div v-show="activeTab === 6" ref="yearlyChargingChartRef" class="chart-box">
+            <div v-if="store.chargingRecords.length === 0" class="no-data">
+              暂无充电数据，请先添加充电记录
+            </div>
+          </div>
         </van-skeleton>
       </div>
 
